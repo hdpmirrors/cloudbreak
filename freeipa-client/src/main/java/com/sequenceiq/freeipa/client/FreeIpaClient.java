@@ -15,14 +15,19 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.reflect.TypeUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.googlecode.jsonrpc4j.JsonRpcHttpClient;
 import com.sequenceiq.cloudbreak.tracing.TracingUtil;
 import com.sequenceiq.freeipa.client.model.Ca;
@@ -51,6 +56,20 @@ import io.opentracing.Tracer;
 public class FreeIpaClient {
 
     public static final String MAX_PASSWORD_EXPIRATION_DATETIME = "20380101000000Z";
+
+    public static final String METHOD_NAME_GROUP_ADD = "group_add";
+
+    public static final String METHOD_NAME_GROUP_DEL = "group_del";
+
+    public static final String METHOD_NAME_USER_ADD = "user_add";
+
+    public static final String METHOD_NAME_USER_DEL = "user_del";
+
+    public static final String METHOD_NAME_USER_MOD = "user_mod";
+
+    public static final String METHOD_NAME_GROUP_ADD_MEMBER = "group_add_member";
+
+    public static final String METHOD_NAME_GROUP_REMOVE_MEMBER = "group_remove_member";
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmssVV");
 
@@ -186,9 +205,12 @@ public class FreeIpaClient {
 
     public User deleteUser(String userUid) throws FreeIpaClientException {
         FreeIpaChecks.checkUserNotProtected(userUid, () -> String.format("User '%s' is protected and cannot be deleted from FreeIPA", userUid));
-        List<Object> flags = List.of(userUid);
-        Map<String, Object> params = Map.of();
-        return (User) invoke("user_del", flags, params, User.class).getResult();
+        Pair<List<Object>, Map<String, Object>> deleteUserFlagsAndParams = getDeleteUserFlagsAndParams(userUid);
+        return (User) invoke(METHOD_NAME_USER_DEL, deleteUserFlagsAndParams.getLeft(), deleteUserFlagsAndParams.getRight(), User.class).getResult();
+    }
+
+    public Pair<List<Object>, Map<String, Object>> getDeleteUserFlagsAndParams(String userUid) {
+        return Pair.of(List.of(userUid), Map.of());
     }
 
     public Role deleteRole(String roleName) throws FreeIpaClientException {
@@ -199,7 +221,11 @@ public class FreeIpaClient {
 
     public User userAdd(String user, String firstName, String lastName) throws FreeIpaClientException {
         FreeIpaChecks.checkUserNotProtected(user, () -> String.format("User '%s' is protected and cannot be added to FreeIPA", user));
-        List<Object> flags = List.of(user);
+        Pair<List<Object>, Map<String, Object>> userAddFlagsAndParams = getUserAddFlagsAndParams(user, firstName, lastName);
+        return (User) invoke(METHOD_NAME_USER_ADD, userAddFlagsAndParams.getLeft(), userAddFlagsAndParams.getRight(), User.class).getResult();
+    }
+
+    public Pair<List<Object>, Map<String, Object>> getUserAddFlagsAndParams(String user, String firstName, String lastName) {
         Map<String, Object> params = Map.of(
                 "givenname", firstName,
                 "sn", lastName,
@@ -207,7 +233,7 @@ public class FreeIpaClient {
                 "random", true,
                 "setattr", "krbPasswordExpiration=" + MAX_PASSWORD_EXPIRATION_DATETIME
         );
-        return (User) invoke("user_add", flags, params, User.class).getResult();
+        return Pair.of(List.of(user), params);
     }
 
     /**
@@ -236,6 +262,14 @@ public class FreeIpaClient {
     public User userSetWorkloadCredentials(String user, String hashedPassword,
             String unencryptedKrbPrincipalKey, Optional<Instant> expiration,
             List<String> sshPublicKeys) throws FreeIpaClientException {
+        Pair<List<Object>, Map<String, Object>> setWlCredentialsFlagsAndParams =
+                getSetWlCredentialsFlagsAndParams(user, hashedPassword, unencryptedKrbPrincipalKey, expiration, sshPublicKeys);
+        return userMod(user, setWlCredentialsFlagsAndParams.getRight());
+    }
+
+    public Pair<List<Object>, Map<String, Object>> getSetWlCredentialsFlagsAndParams(String user, String hashedPassword,
+            String unencryptedKrbPrincipalKey, Optional<Instant> expiration,
+            List<String> sshPublicKeys) {
         Map<String, Object> params = new HashMap<>();
         List<String> attributes = new ArrayList<>();
 
@@ -247,8 +281,7 @@ public class FreeIpaClient {
         }
 
         params.put("ipasshpubkey", sshPublicKeys);
-
-        return userMod(user, params);
+        return Pair.of(List.of(user), params);
     }
 
     String formatDate(Optional<Instant> instant) {
@@ -268,39 +301,53 @@ public class FreeIpaClient {
 
     public User userMod(String user, Map<String, Object> params) throws FreeIpaClientException {
         List<Object> flags = List.of(user);
-        return (User) invoke("user_mod", flags, params, User.class).getResult();
+        return (User) invoke(METHOD_NAME_USER_MOD, flags, params, User.class).getResult();
     }
 
     public Group groupAdd(String group) throws FreeIpaClientException {
         FreeIpaChecks.checkGroupNotProtected(group, () -> String.format("Group '%s' is protected and cannot be added to FreeIPA", group));
-        List<Object> flags = List.of(group);
-        Map<String, Object> params = Map.of();
-        return (Group) invoke("group_add", flags, params, Group.class).getResult();
+        Pair<List<Object>, Map<String, Object>> groupAddFlagsAndParams = getGroupAddFlagsAndParams(group);
+        return (Group) invoke(METHOD_NAME_GROUP_ADD, groupAddFlagsAndParams.getLeft(), groupAddFlagsAndParams.getRight(), Group.class).getResult();
+    }
+
+    public Pair<List<Object>, Map<String, Object>> getGroupAddFlagsAndParams(String group) {
+        return Pair.of(List.of(group), Map.of());
     }
 
     public void deleteGroup(String group) throws FreeIpaClientException {
         FreeIpaChecks.checkGroupNotProtected(group, () -> String.format("Group '%s' is protected and cannot be deleted from FreeIPA", group));
-        List<Object> flags = List.of(group);
-        Map<String, Object> params = Map.of();
-        invoke("group_del", flags, params, Object.class);
+        Pair<List<Object>, Map<String, Object>> deleteGroupFlagsAndParams = getDeleteGroupFlagsAndParams(group);
+        invoke(METHOD_NAME_GROUP_DEL, deleteGroupFlagsAndParams.getLeft(), deleteGroupFlagsAndParams.getRight(), Object.class);
+    }
+
+    public Pair<List<Object>, Map<String, Object>> getDeleteGroupFlagsAndParams(String group) {
+        return Pair.of(List.of(group), Map.of());
     }
 
     public RPCResponse<Group> groupAddMembers(String group, Collection<String> users) throws FreeIpaClientException {
         FreeIpaChecks.checkGroupNotUnmanaged(group, () -> String.format("Group '%s' is not managed and membership cannot be changed", group));
-        List<Object> flags = List.of(group);
+        Pair<List<Object>, Map<String, Object>> groupAddMembersFlagsAndParams = getGroupAddMembersFlagsAndParams(group, users);
+        return invoke(METHOD_NAME_GROUP_ADD_MEMBER, groupAddMembersFlagsAndParams.getLeft(), groupAddMembersFlagsAndParams.getRight(), Group.class);
+    }
+
+    public Pair<List<Object>, Map<String, Object>> getGroupAddMembersFlagsAndParams(String group, Collection<String> users) {
         Map<String, Object> params = Map.of(
                 "user", users
         );
-        return invoke("group_add_member", flags, params, Group.class);
+        return Pair.of(List.of(group), params);
     }
 
     public RPCResponse<Group> groupRemoveMembers(String group, Collection<String> users) throws FreeIpaClientException {
         FreeIpaChecks.checkGroupNotUnmanaged(group, () -> String.format("Group '%s' is not managed and membership cannot be changed", group));
-        List<Object> flags = List.of(group);
+        Pair<List<Object>, Map<String, Object>> groupRemoveMembersFlagsAndParams = getGroupRemoveMembersFlagsAndParams(group, users);
+        return invoke(METHOD_NAME_GROUP_REMOVE_MEMBER, groupRemoveMembersFlagsAndParams.getLeft(), groupRemoveMembersFlagsAndParams.getRight(), Group.class);
+    }
+
+    public Pair<List<Object>, Map<String, Object>> getGroupRemoveMembersFlagsAndParams(String group, Collection<String> users) {
         Map<String, Object> params = Map.of(
                 "user", users
         );
-        return invoke("group_remove_member", flags, params, Group.class);
+        return Pair.of(List.of(group), params);
     }
 
     public Set<Group> groupFindAll() throws FreeIpaClientException {
@@ -679,6 +726,45 @@ public class FreeIpaClient {
         List<Object> flags = List.of(topologySuffixCn, topologySegment.getCn());
         Map<String, Object> params = Map.of();
         return (TopologySegment) invoke("topologysegment_del", flags, params, TopologySegment.class).getResult();
+    }
+
+    public void batch(List<Object> operations) throws FreeIpaClientException {
+        List<List<Object>> partitions = Lists.partition(operations, 100);
+        for (List<Object> operationsPartition : partitions) {
+            List<Object> flags = List.of(operationsPartition);
+            invoke("batch", flags, Map.of(), Object.class);
+        }
+    }
+
+    public void callBatch(BiConsumer<String, String> warnings, List<Object> operations) throws FreeIpaClientException {
+        try {
+            if (!operations.isEmpty()) {
+                batch(operations);
+            }
+        } catch (FreeIpaClientException e) {
+            if (FreeIpaClientExceptionUtil.isDuplicateEntryException(e)) {
+                LOGGER.debug(e.getMessage());
+            } else {
+                LOGGER.warn(e.getMessage());
+                warnings.accept("batch call failed: ", e.getMessage());
+                checkIfClientStillUsable(e);
+            }
+        }
+    }
+
+    public static void fillInOperations(List<Object> operations, String operationName, Supplier<Pair<List<Object>, Map<String, Object>>> supplier) {
+        Pair<List<Object>, Map<String, Object>> flagsAndParams = supplier.get();
+        Map<String, Object> result = Maps.newHashMap();
+        result.put("method", operationName);
+        result.put("params", List.of(flagsAndParams.getLeft(), flagsAndParams.getRight()));
+        operations.add(result);
+    }
+
+    private void checkIfClientStillUsable(FreeIpaClientException e) throws FreeIpaClientException {
+        if (e.isClientUnusable()) {
+            LOGGER.warn("Client is not usable for further usage");
+            throw e;
+        }
     }
 
     private static Map<String, String> createDnsName(String name) {
