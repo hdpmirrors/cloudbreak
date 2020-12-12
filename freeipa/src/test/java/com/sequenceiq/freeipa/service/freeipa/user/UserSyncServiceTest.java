@@ -88,7 +88,7 @@ class UserSyncServiceTest {
     void testFullSyncRetrievesFullIpaState() throws Exception {
         FreeIpaClient freeIpaClient = mock(FreeIpaClient.class);
         UmsUsersState umsUsersState = mock(UmsUsersState.class);
-        underTest.getIpaUserState(freeIpaClient, umsUsersState, true);
+        underTest.getIpaUserState(freeIpaClient);
         verify(freeIpaUsersStateProvider).getUsersState(any());
     }
 
@@ -97,8 +97,7 @@ class UserSyncServiceTest {
         FreeIpaClient freeIpaClient = mock(FreeIpaClient.class);
         UmsUsersState umsUsersState = mock(UmsUsersState.class);
         ImmutableSet<String> workloadUsers = mock(ImmutableSet.class);
-        when(umsUsersState.getRequestedWorkloadUsernames()).thenReturn(workloadUsers);
-        underTest.getIpaUserState(freeIpaClient, umsUsersState, false);
+        underTest.getIpaUserState(freeIpaClient);
         verify(freeIpaUsersStateProvider).getFilteredFreeIpaState(any(), eq(workloadUsers));
     }
 
